@@ -1,0 +1,10 @@
+version: '3.8'  # Use version 3.8 or any suitable version for your Docker Engine
+services:
+  nodered:
+    image: nodered/node-red:latest  # Use the latest Node-RED image
+    environment:
+      - LOCAL_PORT=${LOCAL_PORT}  # Replace with the desired local port that is not being used
+      - SERVICE_PORT=${SERVICE_PORT}  # Replace with the desired internal NodeRed service port default: 1880 
+    ports:
+      - "${LOCAL_PORT}:${SERVICE_PORT}"  # Map TCP port 1880 in the container to port 1880 on the host
+    restart: always  # Option to restart the container if it stops
