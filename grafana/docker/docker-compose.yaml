@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "${LOCAL_PORT}:${SERVICE_PORT}"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD} # Replace with desired admin password
+      - LOCAL_PORT=${LOCAL_PORT}  # Replace with the desired local port that is not being used
+      - SERVICE_PORT=${SERVICE_PORT}  # Replace with the desired internal NodeRed service port default: 1880 
+
+volumes:
+  grafana_data:
