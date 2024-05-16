@@ -1,0 +1,95 @@
+version: "3.9"
+services:
+  s3:
+    image: minio/minio:latest
+    restart: unless-stopped
+    ports:
+      - "${MINIO_LOCAL_PORT_1}:${MINIO_SERVICE_PORT_1}"
+      - "${MINIO_LOCAL_PORT_2}:${MINIO_SERVICE_PORT_2}"
+    environment:
+      - MINIO_ROOT_USER=${AWS_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${AWS_SECRET_ACCESS_KEY}
+      - MINIO_LOCAL_PORT_1=${MINIO_LOCAL_PORT_1}
+      - MINIO_SERVICE_PORT_1=${MINIO_SERVICE_PORT_1}
+      - MINIO_LOCAL_PORT_2=${MINIO_LOCAL_PORT_2}
+      - MINIO_SERVICE_PORT_2=${MINIO_SERVICE_PORT_2}
+    command: server /data --console-address ":${MINIO_SERVICE_PORT_2}"
+    networks:
+      - iot_net  # Connect this service to the 'iot_net' network
+    volumes:
+      - minio_new_volume:/data
+  db:
+    image: mysql:8-oracle # -oracle tag supports arm64 architecture!
+    restart: unless-stopped
+    container_name: mlflow_db
+    expose:
+      - "3306"
+    environment:
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - db_new_volume:/var/lib/mysql
+    networks:
+      - iot_net  # Connect this service to the 'iot_net' network
+  mlflow:
+    image: ubuntu/mlflow:latest
+    container_name: tracker_mlflow
+    restart: unless-stopped
+    ports:
+      - "${MLFLOW_LOCAL_PORT}:${MLFLOW_SERVICE_PORT}"
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_REGION}
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:${MINIO_SERVICE_PORT_1}
+      - MLFLOW_LOCAL_PORT=${MLFLOW_LOCAL_PORT}
+      - MLFLOW_SERVICE_PORT=${MLFLOW_SERVICE_PORT}
+    networks:
+      - iot_net  # Connect this service to the 'iot_net' network
+    entrypoint: mlflow server --backend-store-uri mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE} --default-artifact-root s3://${AWS_BUCKET_NAME}/ --artifacts-destination s3://${AWS_BUCKET_NAME}/ -h 0.0.0.0
+    depends_on:
+      wait-for-db:
+        condition: service_completed_successfully
+  create_s3_buckets:
+    image: minio/mc
+    depends_on:
+      - "s3"
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set minio http://s3:${MINIO_SERVICE_PORT_1} '${AWS_ACCESS_KEY_ID}' '${AWS_SECRET_ACCESS_KEY}') do echo '...waiting...' && sleep 1; done;
+      /usr/bin/mc mb minio/${AWS_BUCKET_NAME};
+      exit 0;
+      "
+    networks:
+      - iot_net  # Connect this service to the 'iot_net' network
+  wait-for-db:
+    image: atkrad/wait4x
+    depends_on:
+      - db
+    command: tcp db:3306 -t 90s -i 250ms
+    networks:
+      - iot_net  # Connect this service to the 'iot_net' network
+  setup-bucket:
+    image: python:3.8-slim
+    depends_on:
+      - create_s3_buckets
+    volumes:
+      - ./config:/run/config
+      - ./startup-scripts:/run/startup-scripts
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=${MLFLOW_S3_ENDPOINT_URL}  # Ensure this is set to the correct URL of your running Minio server
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+    entrypoint: /bin/bash
+    command: -c "pip3 install minio && python3 /run/startup-scripts/startup.sh && exit 0"
+    networks:
+      - iot_net  # Connect this service to the 'iot_net' network
+networks:
+  iot_net:
+    external: true
+volumes:
+  db_new_volume:
+  minio_new_volume:
